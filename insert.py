@@ -9,6 +9,8 @@ class DataLoader:
         self.client = MongoClient('localhost', 27017)
         self.db = self.client['my_db']
         self.users_collection = self.db['users']
+        self.activities_collection = self.db['activities']
+        self.trackpoints_collection = self.db['trackpoints']
         self.data_dir = data_dir
         self.MAX_TRACK_POINTS_PER_ACTIVITY = 2500
 
@@ -20,7 +22,7 @@ class DataLoader:
 
         for user_id in os.listdir(self.data_dir + "/Data"):
             has_labels = user_id in user_ids_with_labels
-            user_records.append({'id': user_id, 'has_labels': has_labels, 'activities': []})
+            user_records.append({'user_id': user_id, 'has_labels': has_labels})
 
         self.users_collection.insert_many(user_records)
         print(f"{len(user_records)} Records inserted successfully into User collection")
@@ -49,33 +51,35 @@ class DataLoader:
                         start, end = start.replace("/", "-"), end.replace("/", "-")
                         labels[(start, end)] = label
 
-            activities = []
             for activity in os.listdir(user_dir + "/Trajectory"):
                 track_points = pd.read_csv(user_dir + "/Trajectory/" + activity, skiprows=6, header=None)
 
-                if len(track_points) > 2500:
+                if len(track_points) > self.MAX_TRACK_POINTS_PER_ACTIVITY:
                     continue
 
                 start_date_time, end_date_time = self.get_timestamps(track_points)
                 transportation_mode = labels.get((start_date_time, end_date_time), None)
 
+                track_points_list = track_points.apply(
+                    lambda row: {"activity_id": activity, 'lat': row[0], 'lon': row[1], 'altitude': row[3], 'date_days': row[4],
+                                 'date_time': row[5] + " " + row[6]}, axis=1).tolist()
+
                 activity_record = {
+                    "user_id": user_id,
                     'transportation_mode': transportation_mode,
                     'start_date_time': start_date_time,
-                    'end_date_time': end_date_time,
-                    'track_points': track_points.apply(lambda row: {
-                        'lat': row[0],
-                        'lon': row[1],
-                        'altitude': row[3],
-                        'date_days': row[4],
-                        'date_time': row[5] + " " + row[6]
-                    }, axis=1).tolist()
+                    'end_date_time': end_date_time
                 }
 
-                activities.append(activity_record)
+                activity_id = self.activities_collection.insert_one(activity_record).inserted_id
 
-            self.users_collection.update_one({'id': user_id}, {'$push': {'activities': {'$each': activities}}})
-            print(f"{len(activities)} activities inserted successfully for user {user_id}")
+                for tp in track_points_list:
+                    tp["activity_id"] = activity_id
+
+                self.trackpoints_collection.insert_many(track_points_list)
+                print(f"{len(track_points_list)} trackpoints inserted successfully for activity {activity}")
+
+            print(f"Activities and trackpoints inserted successfully for user {user_id}")
 
         print("All records inserted successfully.")
 
