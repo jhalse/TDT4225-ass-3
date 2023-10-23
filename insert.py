@@ -1,16 +1,17 @@
 import os
 import pandas as pd
 from pymongo import MongoClient
+from DbConnector import DbConnector
 
 
 class DataLoader:
 
-    def __init__(self, data_dir="./dataset"):
-        self.client = MongoClient('localhost', 27017)
-        self.db = self.client['my_db']
-        self.users_collection = self.db['users']
-        self.activities_collection = self.db['activities']
-        self.trackpoints_collection = self.db['trackpoints']
+    def __init__(self, db_connector, data_dir="./dataset"):
+        self.client = db_connector.client
+        self.db = db_connector.db
+        self.users_collection = self.db["users"]
+        self.activities_collection = self.db["activities"]
+        self.trackpoints_collection = self.db["trackpoints"]
         self.data_dir = data_dir
         self.MAX_TRACK_POINTS_PER_ACTIVITY = 2500
 
@@ -41,6 +42,8 @@ class DataLoader:
 
         for user_id in os.listdir(data_dir):
             user_dir = data_dir + "/" + user_id
+            if not os.path.isdir(user_dir):
+                continue
             labels = {}
 
             if "labels.txt" in os.listdir(user_dir):
@@ -85,6 +88,7 @@ class DataLoader:
 
 
 if __name__ == "__main__":
-    loader = DataLoader()
+    db_connector = DbConnector(DATABASE="my_db", HOST="tdt4225-21.idi.ntnu.no", USER="mongo", PASSWORD="mongo")
+    loader = DataLoader(db_connector)
     loader.load_users()
     loader.load_activities()
