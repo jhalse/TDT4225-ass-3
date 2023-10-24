@@ -1,5 +1,7 @@
 import argparse
 import itertools
+from pprint import pprint
+
 from tabulate import tabulate
 from DbConnector import DbConnector
 import pandas as pd
@@ -13,10 +15,13 @@ import pandas
 
 class Queries:
 
-    def __init__(self):
-        self.connection = DbConnector()
-        self.db_connection = self.connection.db_connection
-        self.cursor = self.connection.cursor
+    def __init__(self, db_connector):
+        self.connection = db_connector
+        self.client = db_connector.client
+        self.db = db_connector.db
+        self.users_collection = self.db["users"]
+        self.activities_collection = self.db["activities"]
+        self.trackpoints_collection = self.db["trackpoints"]
 
     def query_one(self, table_name):
         query = "SELECT COUNT(*) FROM %s"
@@ -25,20 +30,12 @@ class Queries:
         print(f"Entries in {table_name}: {result[0]}")
 
     def query_two(self):
-        number_of_trackpoints_per_user = "SELECT Activity.user_id, " \
-                                         "  COUNT(TrackPoint.id) AS Number_of_trackpoints " \
-                                         "FROM Activity " \
-                                         "INNER JOIN TrackPoint ON Activity.id = TrackPoint.activity_id " \
-                                         "GROUP BY Activity.user_id"
-
-        query = "SELECT AVG(Number_of_trackpoints), " \
-                "       MAX(Number_of_trackpoints), " \
-                "       MIN(Number_of_trackpoints) " \
-                "FROM ( %s ) AS number_of_trackpoints_per_user_query"
-        self.cursor.execute(query % number_of_trackpoints_per_user)
-        result = self.cursor.fetchone()
-        average, maximum, minimum = result
-        print(f"Average: {average}, maximum: {maximum} and minimum: {minimum} trackpoints per user")
+        result = self.activities_collection.aggregate([
+            {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
+            {"$group": {"_id": "null", "avg": {"$avg": "$count"}}}
+        ])
+        average_activities_per_user = list(result)[0]['avg']
+        print(f"Average number of activities per user: {average_activities_per_user :.2f}")
 
     def query_three(self):
         query = "SELECT Activity.user_id, " \
@@ -53,14 +50,9 @@ class Queries:
             f"Top 15 users with the highest number of activities: \n{tabulate(result, ['User ID', 'Number of Activities'])}")
 
     def query_four(self):
-        query = "SELECT DISTINCT user_id " \
-                "FROM Activity " \
-                "WHERE transportation_mode = 'bus'"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(f"Users taken the bus:")
-        for user in result:
-            print(user[0])
+        result = self.activities_collection.find({"transportation_mode": "taxi"}, {"user_id": 1, "_id": 0})
+        print("All users who have taken a taxi:")
+        pprint(list(result))
 
     def query_five(self):
         query = "SELECT user_id, " \
@@ -76,61 +68,78 @@ class Queries:
             f"Top 10 users with different transportation modes: \n{tabulate(result, ['User ID', 'Number of transportation modes'])}")
 
     def query_six(self):
-        query = "SELECT user_id, transportation_mode, start_date_time, end_date_time " \
-                "FROM Activity " \
-                "GROUP BY user_id, transportation_mode, start_date_time, end_date_time " \
-                "HAVING COUNT(*) > 1;"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(f"duplicates: \n{tabulate(result)} ")
+        # result = self.activities_collection.find_one()
+        # pprint(result)
+
+        # a)
+        result = self.activities_collection.aggregate([
+            {"$group": {"_id": {"$year": "$start_date_time"}, "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 1}
+        ])
+        result = list(result)
+        year_with_most_activities = result[0]['_id']
+        year_with_most_activities_count = result[0]['count']
+
+        # b)
+        result = self.activities_collection.aggregate([
+            {
+                "$project":
+                    {
+                        "year": {"$year": "$start_date_time"},
+                        "duration": {
+                            "$divide": [
+                                {
+                                    "$subtract": ["$end_date_time", "$start_date_time"]}, 3600000  # ms to hours
+                            ]
+                        }
+                    }
+            },
+            {"$group": {"_id": "$year", "total_hours": {"$sum": "$duration"}}},
+            {"$sort": {"total_hours": -1}},
+            {"$limit": 1}
+        ])
+
+        result = list(result)
+        year_with_most_hours = result[0]['_id']
+        year_with_most_hours_count = result[0]['total_hours']
+        is_same_year = year_with_most_hours == year_with_most_activities
+
+        print(f"Year with most activities: {year_with_most_activities} ({year_with_most_activities_count})")
+        print(f"Year with most hours: {year_with_most_hours} ({year_with_most_hours_count:.2f})")
+        print(f"Is the year with most activities the same as the year with most hours? {is_same_year}")
 
     def query_seven(self):
         subquery = "select user_id, transportation_mode, start_date_time, end_date_time " \
-                "from Activity " \
-                "where DATE(end_date_time) > DATE(start_date_time)"
-                                
+                   "from Activity " \
+                   "where DATE(end_date_time) > DATE(start_date_time)"
+
         query_a = "select COUNT(DISTINCT user_id) AS user_count " \
-                "from ( %s ) as subquery "
+                  "from ( %s ) as subquery "
         self.cursor.execute(query_a % subquery)
         result_a = self.cursor.fetchall()
 
         print(f"Number of users who have activities spanning two dates: \n{tabulate(result_a)}")
 
         query_b = "SELECT user_id, transportation_mode, TIMESTAMPDIFF(SECOND, start_date_time, end_date_time) AS duration " \
-                "FROM ( %s ) AS subquery "
-        
+                  "FROM ( %s ) AS subquery "
+
         self.cursor.execute(query_b % subquery)
         result_b = self.cursor.fetchall()
         print(f"Duration of activities spanning two dates: \n{tabulate(result_b)}")
 
     # Assuming that the task wants us to find each single person who has been close to any other person both in time and space
     def query_eight(self):
-        query = """SELECT Activity.user_id, TrackPoint.date_time, TrackPoint.lat, TrackPoint.lon 
-                   FROM TrackPoint 
-                   INNER JOIN Activity ON TrackPoint.activity_id = Activity.id 
-                   ORDER BY TrackPoint.date_time 
-                """
-        
-        df = pd.read_sql(query, self.db_connection)
-
-        def haversine(lat1, lon1, lat2, lon2, radius=6371):
-            """
-            Calculate the distance between two points on a sphere using the Haversine formula.
-            """
-            dlat = np.radians(lat2 - lat1)
-            dlon = np.radians(lon2 - lon1)
-            a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
-            c = 2 * np.arcsin(np.sqrt(a))
-            return radius * c
-
-        df['distance'] = haversine(df['lat'].shift(), df['lon'].shift(), df['lat'], df['lon'])
-        df["time_diff"] = df.groupby("user_id")["date_time"].diff()
-
-        m1 = df["time_diff"] <= pd.Timedelta(seconds=30)
-        m3 = df["user_id"] != df["user_id"].shift()
-        m2 = df["distance"] <= 50
-        n_unique = df[m1 & m2 & m3]["user_id"].nunique()
-        print(f"Number of unique user ids: {n_unique}")
+        # Find the top 20 users who have gained the most altitude where altidude is not -777
+        result = self.trackpoints_collection.aggregate([
+            {"$match": {"altitude": {"$ne": -777, "$exists": True}}},
+            {"$group": {"_id": "$user_id", "altitude_diff": {"$sum": "$altitude"}}},  # TODO: need user id in trackpoint, use altidude_diff in insertion?
+            {"$sort": {"altitude_diff": -1}},
+            {"$limit": 20}
+        ])
+        result = list(result)
+        print("Top 20 users who have gained the most altitude")
+        pprint(list(result))
 
     def query_nine(self):
         query_altitude_trackpoint = "SELECT Activity.user_id, activity_id, altitude " \
@@ -250,15 +259,16 @@ class Queries:
             f"All users with registered transportation modes and their most used transportation mode: \n{tabulate(result, headers=['user_id', 'transportation_mode'])} ")
 
 
-def main():
+def main(query):
     program = None
     try:
-        program = Queries()
-        table_names = ["Activity", "TrackPoint", "User"]
+        db_connector = DbConnector(DATABASE="my_db", HOST="tdt4225-21.idi.ntnu.no", USER="mongo", PASSWORD="mongo")
+
+        program = Queries(db_connector)
+
         # cleanly run queries based on argument
         if query == 1:
-            for name in table_names:
-                program.query_one(table_name=name)
+            pass
         elif query == 2:
             program.query_two()
         elif query == 3:
@@ -294,6 +304,6 @@ def main():
 if __name__ == '__main__':
     # Use args to be able to choose which query you want to run
     parser = argparse.ArgumentParser(description="Choose query")
-    parser.add_argument("-query", type=int, help="Choose query")
+    parser.add_argument("-query", type=int, help="Choose query", default=8)
     args = parser.parse_args()
     main(args.query)
