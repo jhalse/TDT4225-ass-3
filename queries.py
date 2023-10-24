@@ -15,14 +15,27 @@ class Queries:
 
     def __init__(self):
         self.connection = DbConnector()
-        self.db_connection = self.connection.db_connection
-        self.cursor = self.connection.cursor
+        self.client = self.connection.client
+        self.db = self.connection.db
 
-    def query_one(self, table_name):
-        query = "SELECT COUNT(*) FROM %s"
-        self.cursor.execute(query % table_name)
-        result = self.cursor.fetchone()
-        print(f"Entries in {table_name}: {result[0]}")
+   
+        self.users_collection = self.db["users"]
+        self.activities_collection = self.db["activities"]
+        self.trackpoints_collection = self.db["trackpoints"]
+
+    """How many users, activities and trackpoints are there in the dataset"""
+    def query_one(self):
+        user_count = self.users_collection.count_documents({})
+        activity_count = self.activities_collection.count_documents({})
+        trackpoint_count = self.trackpoints_collection.count_documents({})
+
+        table_data = [
+        ["Users", user_count],
+        ["Activities", activity_count],
+        ["Trackpoints", trackpoint_count]]
+
+        print(tabulate(table_data, headers=["Collection", "Count"]))
+        
 
     def query_two(self):
         number_of_trackpoints_per_user = "SELECT Activity.user_id, " \
@@ -40,17 +53,17 @@ class Queries:
         average, maximum, minimum = result
         print(f"Average: {average}, maximum: {maximum} and minimum: {minimum} trackpoints per user")
 
+    """Find the top 20 users with the highest number of activities."""
     def query_three(self):
-        query = "SELECT Activity.user_id, " \
-                "   COUNT(Activity.id) AS Number_of_activities  " \
-                "FROM Activity " \
-                "GROUP BY Activity.user_id " \
-                "ORDER BY Number_of_activities DESC " \
-                "LIMIT 15"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(
-            f"Top 15 users with the highest number of activities: \n{tabulate(result, ['User ID', 'Number of Activities'])}")
+        group_users = {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+        sort_by_count = {"$sort": {"count": -1}}
+        limit = {"$limit": 20}
+
+        top_users = self.activities_collection.aggregate([group_users, sort_by_count, limit])
+
+        table = [(user["_id"], user["count"]) for user in top_users]
+        print(tabulate(table, headers=["User", "Number of activities"]))
+        
 
     def query_four(self):
         query = "SELECT DISTINCT user_id " \
@@ -61,19 +74,18 @@ class Queries:
         print(f"Users taken the bus:")
         for user in result:
             print(user[0])
-
+        
+    """Find all types of transportation modes and count how many activities that are
+    tagged with these transportation mode labels. Do not count the rows where
+    the mode is null."""
     def query_five(self):
-        query = "SELECT user_id, " \
-                "   COUNT(DISTINCT transportation_mode) AS transport_count " \
-                "FROM Activity " \
-                "WHERE transportation_mode IS NOT NULL " \
-                "GROUP BY user_id " \
-                "ORDER BY transport_count DESC " \
-                "LIMIT 10"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(
-            f"Top 10 users with different transportation modes: \n{tabulate(result, ['User ID', 'Number of transportation modes'])}")
+        transportation_not_null = { "$match": {"transportation_mode": {"$ne": None}}}
+        group_transportation = {"$group": { "_id": "$transportation_mode", "activity_count": {"$sum": 1}}}
+        sort_by_count = {"$sort": {"activity_count": -1}}
+
+        transportation_modes_in_activites = self.activities_collection.aggregate([transportation_not_null, group_transportation, sort_by_count])
+        table = [(transport["_id"], transport["activity_count"]) for transport in transportation_modes_in_activites]
+        print(tabulate(table, headers=["Transportation mode", "Number of activities"]))
 
     def query_six(self):
         query = "SELECT user_id, transportation_mode, start_date_time, end_date_time " \
