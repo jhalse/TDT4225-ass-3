@@ -23,11 +23,19 @@ class Queries:
         self.activities_collection = self.db["activities"]
         self.trackpoints_collection = self.db["trackpoints"]
 
-    def query_one(self, table_name):
-        query = "SELECT COUNT(*) FROM %s"
-        self.cursor.execute(query % table_name)
-        result = self.cursor.fetchone()
-        print(f"Entries in {table_name}: {result[0]}")
+    """How many users, activities and trackpoints are there in the dataset"""
+    def query_one(self):
+        user_count = self.users_collection.count_documents({})
+        activity_count = self.activities_collection.count_documents({})
+        trackpoint_count = self.trackpoints_collection.count_documents({})
+
+        table_data = [
+        ["Users", user_count],
+        ["Activities", activity_count],
+        ["Trackpoints", trackpoint_count]]
+
+        print(tabulate(table_data, headers=["Collection", "Count"]))
+        
 
     def query_two(self):
         result = self.activities_collection.aggregate([
@@ -37,17 +45,17 @@ class Queries:
         average_activities_per_user = list(result)[0]['avg']
         print(f"Average number of activities per user: {average_activities_per_user :.2f}")
 
+    """Find the top 20 users with the highest number of activities."""
     def query_three(self):
-        query = "SELECT Activity.user_id, " \
-                "   COUNT(Activity.id) AS Number_of_activities  " \
-                "FROM Activity " \
-                "GROUP BY Activity.user_id " \
-                "ORDER BY Number_of_activities DESC " \
-                "LIMIT 15"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(
-            f"Top 15 users with the highest number of activities: \n{tabulate(result, ['User ID', 'Number of Activities'])}")
+        group_users = {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+        sort_by_count = {"$sort": {"count": -1}}
+        limit = {"$limit": 20}
+
+        top_users = self.activities_collection.aggregate([group_users, sort_by_count, limit])
+
+        table = [(user["_id"], user["count"]) for user in top_users]
+        print(tabulate(table, headers=["User", "Number of activities"]))
+        
 
     def query_four(self):
         result = self.activities_collection.find({"transportation_mode": "taxi"}, {"user_id": 1, "_id": 0})
@@ -55,17 +63,13 @@ class Queries:
         pprint(list(result))
 
     def query_five(self):
-        query = "SELECT user_id, " \
-                "   COUNT(DISTINCT transportation_mode) AS transport_count " \
-                "FROM Activity " \
-                "WHERE transportation_mode IS NOT NULL " \
-                "GROUP BY user_id " \
-                "ORDER BY transport_count DESC " \
-                "LIMIT 10"
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(
-            f"Top 10 users with different transportation modes: \n{tabulate(result, ['User ID', 'Number of transportation modes'])}")
+        transportation_not_null = { "$match": {"transportation_mode": {"$ne": None}}}
+        group_transportation = {"$group": { "_id": "$transportation_mode", "activity_count": {"$sum": 1}}}
+        sort_by_count = {"$sort": {"activity_count": -1}}
+
+        transportation_modes_in_activites = self.activities_collection.aggregate([transportation_not_null, group_transportation, sort_by_count])
+        table = [(transport["_id"], transport["activity_count"]) for transport in transportation_modes_in_activites]
+        print(tabulate(table, headers=["Transportation mode", "Number of activities"]))
 
     def query_six(self):
         # result = self.activities_collection.find_one()
@@ -304,6 +308,6 @@ def main(query):
 if __name__ == '__main__':
     # Use args to be able to choose which query you want to run
     parser = argparse.ArgumentParser(description="Choose query")
-    parser.add_argument("-query", type=int, help="Choose query", default=8)
+    parser.add_argument("-query", type=int, help="Choose query")
     args = parser.parse_args()
     main(args.query)

@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from pymongo import MongoClient
 from DbConnector import DbConnector
+from datetime import datetime
 
 
 class DataLoader:
@@ -68,13 +69,13 @@ class DataLoader:
 
                 track_points_list = track_points.apply(
                     lambda row: {"user_id": user_id, "activity_id": activity, 'lat': row[0], 'lon': row[1], 'altitude': row[3], 'date_days': row[4],
-                                 'date_time': row[5] + " " + row[6]}, axis=1).tolist()
+                                 "date_from": datetime.strptime(row[5] + " " + row[6], "%Y-%m-%d %H:%M:%S")}, axis=1).tolist()
 
                 activity_record = {
                     "user_id": user_id,
                     'transportation_mode': transportation_mode,
-                    'start_date_time': start_date_time,
-                    'end_date_time': end_date_time,
+                    'start_date_time': datetime.strptime(start_date_time, "%Y-%m-%d %H:%M:%S"),
+                    'end_date_time': datetime.strptime(end_date_time, "%Y-%m-%d %H:%M:%S"),
                     "altitude_diff": altitude_diff,
                 }
 
@@ -90,9 +91,16 @@ class DataLoader:
 
         print("All records inserted successfully.")
 
+    def drop_collections(self):
+        self.users_collection.drop()
+        self.activities_collection.drop()
+        self.trackpoints_collection.drop()
+        print("All collections have been dropped.")
+
 
 if __name__ == "__main__":
     db_connector = DbConnector(DATABASE="my_db", HOST="tdt4225-21.idi.ntnu.no", USER="mongo", PASSWORD="mongo")
     loader = DataLoader(db_connector)
+    loader.drop_collections()
     loader.load_users()
     loader.load_activities()
