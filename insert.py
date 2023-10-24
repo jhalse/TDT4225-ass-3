@@ -64,15 +64,19 @@ class DataLoader:
                 start_date_time, end_date_time = self.get_timestamps(track_points)
                 transportation_mode = labels.get((start_date_time, end_date_time), None)
 
+                filtered_track_points = track_points[track_points.iloc[:, 3] != -777]
+                altitude_diff = filtered_track_points.iloc[:, 3].diff()
+
                 track_points_list = track_points.apply(
-                    lambda row: {"activity_id": activity, 'lat': row[0], 'lon': row[1], 'altitude': row[3], 'date_days': row[4],
-                                 'date_time': datetime.strptime(row[5] + " " + row[6], "%Y-%m-%d %H:%M:%S")}, axis=1).tolist()                                 
+                    lambda row: {"user_id": user_id, "activity_id": activity, 'lat': row[0], 'lon': row[1], 'altitude': row[3], 'date_days': row[4],
+                                 "date_from": datetime.strptime(row[5] + " " + row[6], "%Y-%m-%d %H:%M:%S")}, axis=1).tolist()
 
                 activity_record = {
                     "user_id": user_id,
                     'transportation_mode': transportation_mode,
                     'start_date_time': datetime.strptime(start_date_time, "%Y-%m-%d %H:%M:%S"),
-                    'end_date_time': datetime.strptime(end_date_time, "%Y-%m-%d %H:%M:%S")
+                    'end_date_time': datetime.strptime(end_date_time, "%Y-%m-%d %H:%M:%S"),
+                    "altitude_diff": altitude_diff,
                 }
 
                 activity_id = self.activities_collection.insert_one(activity_record).inserted_id
