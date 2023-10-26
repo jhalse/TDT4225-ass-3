@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from pymongo import MongoClient
 from DbConnector import DbConnector
 from datetime import datetime
 
@@ -76,7 +75,7 @@ class DataLoader:
                     'transportation_mode': transportation_mode,
                     'start_date_time': datetime.strptime(start_date_time, "%Y-%m-%d %H:%M:%S"),
                     'end_date_time': datetime.strptime(end_date_time, "%Y-%m-%d %H:%M:%S"),
-                    "altitude_diff": altitude_diff,
+                    "altitude_diff": altitude_diff.sum(),
                 }
 
                 activity_id = self.activities_collection.insert_one(activity_record).inserted_id

@@ -1,16 +1,12 @@
 import argparse
-import itertools
+from datetime import datetime
 from pprint import pprint
 
-from tabulate import tabulate
-from DbConnector import DbConnector
 import pandas as pd
-import numpy as np
+from haversine import haversine
+from tabulate import tabulate
 
-import pandas as pd
-from tabulate import tabulate
 from DbConnector import DbConnector
-import pandas
 
 
 class Queries:
@@ -132,24 +128,30 @@ class Queries:
         print(f"Year with most hours: {year_with_most_hours} ({year_with_most_hours_count:.2f})")
         print(f"Is the year with most activities the same as the year with most hours? {is_same_year}")
 
+    """Find the total distance (in km) walked in 2008, by user with id=112."""
     def query_seven(self):
-        subquery = "select user_id, transportation_mode, start_date_time, end_date_time " \
-                   "from Activity " \
-                   "where DATE(end_date_time) > DATE(start_date_time)"
+        filter = { 
+            "$match": {
+                "user_id": {"$eq": "112"}, 
+                "transportation_mode": {"$eq": "walk"}, 
+                "start_date_time": {"$gte": datetime(2008, 1, 1), "$lt": datetime(2009, 1, 1)},
+                "end_date_time": {"$gte": datetime(2008, 1, 1), "$lt": datetime(2009, 1, 1)}
+            } 
+        }
 
-        query_a = "select COUNT(DISTINCT user_id) AS user_count " \
-                  "from ( %s ) as subquery "
-        self.cursor.execute(query_a % subquery)
-        result_a = self.cursor.fetchall()
+        activities = self.activities_collection.aggregate([filter])
+        total_distance = 0
 
-        print(f"Number of users who have activities spanning two dates: \n{tabulate(result_a)}")
-
-        query_b = "SELECT user_id, transportation_mode, TIMESTAMPDIFF(SECOND, start_date_time, end_date_time) AS duration " \
-                  "FROM ( %s ) AS subquery "
-
-        self.cursor.execute(query_b % subquery)
-        result_b = self.cursor.fetchall()
-        print(f"Duration of activities spanning two dates: \n{tabulate(result_b)}")
+        for activity in activities:
+            trackpoints = list(self.trackpoints_collection.find({"activity_id": activity['_id']}))
+            
+            for i in range(1, len(trackpoints)):
+                trackpoint1 = (trackpoints[i-1]['lat'], trackpoints[i-1]['lon'])
+                trackpoint2 = (trackpoints[i]['lat'], trackpoints[i]['lon'])
+                total_distance += haversine(trackpoint1, trackpoint2)
+        
+        print(f"Total distance walked by user 112 in 2008: {total_distance} km")    
+ 
 
     def query_eight(self):
         """
@@ -173,7 +175,7 @@ class Queries:
         query_altitude_trackpoint = "SELECT Activity.user_id, activity_id, altitude " \
                                     "FROM TrackPoint " \
                                     "JOIN Activity ON Activity.id = TrackPoint.activity_id "
-        df = pandas.read_sql(query_altitude_trackpoint, self.db_connection)
+        df = pd.read_sql(query_altitude_trackpoint, self.db_connection)
         # handle invalid values
         df = df[df['altitude'] != -777]
         # diff(): calculates the difference between current and prev row on altitude ie. altitude difference
@@ -268,6 +270,18 @@ class Queries:
         print("Users who have registered transportation_mode and their most used transportation_mode")
         print(tabulate(table, headers=["User", "Mode", "Count"]))
 
+    def query_print_samples(self):
+        user = self.users_collection.find_one()
+        print("\nInstance of User:")
+        pprint(user)
+
+        activity = self.activities_collection.find_one({"transportation_mode": {"$ne": None}})
+        print("\nInstance of Activity")
+        pprint(activity)
+
+        trackpoint = self.trackpoints_collection.find_one({"activity_id": activity["_id"]})
+        print("\nInstance of Trackpoint")
+        pprint(trackpoint)
 
 def main(query):
     program = None
@@ -299,6 +313,8 @@ def main(query):
             program.query_ten()
         elif query == 11:
             program.query_eleven()
+        elif query == 13:
+            program.query_print_samples()
         else:
             print("ERROR: Invalid query number")
 
@@ -312,6 +328,6 @@ def main(query):
 if __name__ == '__main__':
     # Use args to be able to choose which query you want to run
     parser = argparse.ArgumentParser(description="Choose query")
-    parser.add_argument("-query", type=int, help="Choose query", default=11)
+    parser.add_argument("-query", type=int, help="Choose query")
     args = parser.parse_args()
     main(args.query)
