@@ -137,11 +137,25 @@ class Queries:
 
     # Assuming that the task wants us to find each single person who has been close to any other person both in time and space
     def query_eight(self):
+<<<<<<< HEAD
         # Find the top 20 users who have gained the most altitude where altidude is not -777
         result = self.trackpoints_collection.aggregate([
             {"$match": {"altitude": {"$ne": -777, "$exists": True}}},
             {"$group": {"_id": "$user_id", "altitude_diff": {"$sum": "$altitude"}}},  # TODO: need user id in trackpoint, use altidude_diff in insertion?
             {"$sort": {"altitude_diff": -1}},
+=======
+        """
+        Find the top 20 users who have gained the most altitude where altidude is not -777.
+
+        Activities are grouped by user id and the altitude difference is summed up for each user.
+        The altitude difference is multiplied by 0.3048 to convert from feet to meters.
+        """
+
+        result = self.activities_collection.aggregate([
+            {"$match": {"altitude_diff": {"$gt": 0}}},
+            {"$group": {"_id": "$user_id", "max_altitude_gain": {"$sum": {"$multiply": ["$altitude_gained", 0.3048]}}}},
+            {"$sort": {"max_altitude_gain": -1}},
+>>>>>>> 6d7cde7... Fix altitude gain calculation
             {"$limit": 20}
         ])
         result = list(result)
@@ -325,6 +339,6 @@ def main(query):
 if __name__ == '__main__':
     # Use args to be able to choose which query you want to run
     parser = argparse.ArgumentParser(description="Choose query")
-    parser.add_argument("-query", type=int, help="Choose query")
+    parser.add_argument("-query", type=int, help="Choose query", default=8)
     args = parser.parse_args()
     main(args.query)
