@@ -1,13 +1,12 @@
 import argparse
-import itertools
+from datetime import datetime
 from pprint import pprint
 
-from tabulate import tabulate
-from DbConnector import DbConnector
 import pandas as pd
-import numpy as np
-from datetime import datetime
 from haversine import haversine
+from tabulate import tabulate
+
+from DbConnector import DbConnector
 
 
 class Queries:
@@ -20,8 +19,8 @@ class Queries:
         self.activities_collection = self.db["activities"]
         self.trackpoints_collection = self.db["trackpoints"]
 
-    """How many users, activities and trackpoints are there in the dataset"""
     def query_one(self):
+        """How many users, activities and trackpoints are there in the dataset"""
         user_count = self.users_collection.count_documents({})
         activity_count = self.activities_collection.count_documents({})
         trackpoint_count = self.trackpoints_collection.count_documents({})
@@ -35,6 +34,10 @@ class Queries:
         
 
     def query_two(self):
+        """Find the average number of activities per user.
+
+        Calculates the number of activities for each user and then calculates the average.
+        """
         result = self.activities_collection.aggregate([
             {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
             {"$group": {"_id": "null", "avg": {"$avg": "$count"}}}
@@ -55,9 +58,15 @@ class Queries:
         
 
     def query_four(self):
-        result = self.activities_collection.find({"transportation_mode": "taxi"}, {"user_id": 1, "_id": 0})
-        print("All users who have taken a taxi:")
-        pprint(list(result))
+        """Find all users who have taken a taxi."""
+        result = self.activities_collection.distinct(
+            "user_id",
+            {
+                "transportation_mode": "taxi"
+            }
+        )
+
+        print(tabulate([[line] for line in list(result)], headers=["All users who have taken a taxi"]))
 
     def query_five(self):
         transportation_not_null = { "$match": {"transportation_mode": {"$ne": None}}}
@@ -69,8 +78,17 @@ class Queries:
         print(tabulate(table, headers=["Transportation mode", "Number of activities"]))
 
     def query_six(self):
-        # result = self.activities_collection.find_one()
-        # pprint(result)
+        """
+        For the grouping by year we only consider the start_date_time of activities.
+
+        a) Find the year with the most activities.
+        We extract the year from the start_date_time and group by year, yielding the count for each year.
+
+        b) Is this also the year with most recorded hours?
+        We extract the year from the start_date_time and calculate the duration of each activity.
+        The duration is calculated by subtracting the start_date_time from the end_date_time and converting ms to hours
+        This is summed for each year.
+        """
 
         # a)
         result = self.activities_collection.aggregate([
@@ -135,24 +153,29 @@ class Queries:
         print(f"Total distance walked by user 112 in 2008: {total_distance} km")    
  
 
-    # Assuming that the task wants us to find each single person who has been close to any other person both in time and space
     def query_eight(self):
-        # Find the top 20 users who have gained the most altitude where altidude is not -777
-        result = self.trackpoints_collection.aggregate([
-            {"$match": {"altitude": {"$ne": -777, "$exists": True}}},
-            {"$group": {"_id": "$user_id", "altitude_diff": {"$sum": "$altitude"}}},  # TODO: need user id in trackpoint, use altidude_diff in insertion?
-            {"$sort": {"altitude_diff": -1}},
+        """
+        Find the top 20 users who have gained the most altitude where altidude is not -777.
+
+        Activities are grouped by user id and the altitude difference is summed up for each user.
+        The altitude difference is multiplied by 0.3048 to convert from feet to meters.
+        """
+
+        result = self.activities_collection.aggregate([
+            {"$group": {"_id": "$user_id", "max_altitude_gain": {"$sum": {"$multiply": ["$altitude_diff", 0.3048]}}}},
+            {"$sort": {"max_altitude_gain": -1}},
             {"$limit": 20}
         ])
         result = list(result)
         print("Top 20 users who have gained the most altitude")
-        pprint(list(result))
+        table = [(line["_id"], round(line["max_altitude_gain"], 4)) for line in result]
+        print(tabulate(table, headers=["User", "Altitude gain"]))
 
     def query_nine(self):
         query_altitude_trackpoint = "SELECT Activity.user_id, activity_id, altitude " \
                                     "FROM TrackPoint " \
                                     "JOIN Activity ON Activity.id = TrackPoint.activity_id "
-        df = pandas.read_sql(query_altitude_trackpoint, self.db_connection)
+        df = pd.read_sql(query_altitude_trackpoint, self.db_connection)
         # handle invalid values
         df = df[df['altitude'] != -777]
         # diff(): calculates the difference between current and prev row on altitude ie. altitude difference
@@ -166,104 +189,86 @@ class Queries:
         top_15_users = sorted_users.head(15)
         print(top_15_users)
 
-    def query_10_longest_distances_per_transportation_mode_per_day(self):
-        query = """
-             SELECT 
-                transportation_mode,
-                user_id,
-                MAX(total_distance) AS max_distance
-            FROM (
-                SELECT
-                    a.user_id,
-                    a.transportation_mode,
-                    DATE(tp1.date_time) as travel_date,
-                    SUM(
-                        ST_DISTANCE_SPHERE(
-                            POINT(tp1.lon, tp1.lat),
-                            POINT(tp2.lon, tp2.lat)
-                        ) / 1000 
-                    ) AS total_distance
-                FROM
-                    Activity a
-                JOIN 
-                    TrackPoint tp1 ON a.id = tp1.activity_id
-                JOIN
-                    TrackPoint tp2 ON a.id = tp2.activity_id AND tp1.id = tp2.id - 1
-                WHERE
-                    a.transportation_mode IS NOT NULL
-                GROUP BY 
-                    a.user_id,
-                    a.transportation_mode,
-                    DATE(tp1.date_time)
-            ) AS distances
-            GROUP BY
-                transportation_mode, user_id;
+    def query_ten(self):
         """
-        result = pd.read_sql_query(query, self.db_connection)
-        result = result.sort_values('max_distance', ascending=False).drop_duplicates(['transportation_mode'])
+        Find the users who have tracked an activity in the Forbidden City of Beijing.
 
-        print(
-            f"Users that have traveled the longest total distance in one day for each transportation mode: \n{tabulate(result, headers=['transportation_mode', 'user_id', 'distance (km)'])} ")
-
-    def query_11_users_with_invalid_activities(self):
-        query = """
-            SELECT
-                a.user_id,
-                COUNT(DISTINCT a.id) as invalid_activities
-            FROM
-                Activity a
-            JOIN TrackPoint t1 ON
-                a.id = t1.activity_id
-            JOIN TrackPoint t2 ON
-                a.id = t2.activity_id
-                AND t1.id = t2.id - 1
-                AND TIMESTAMPDIFF(
-                    MINUTE,
-                    t1.date_time,
-                    t2.date_time
-                ) > 5
-            GROUP BY
-                a.user_id;
+        For this task we assume that the Forbidden City is the area between the following coordinates,
+        where the area is defined by higher precision coordinates: lat 39.916, lon 116.397.
         """
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(f"All users with invalid activities: \n{tabulate(result, headers=['user_id', 'invalid_activities'])} ")
 
-    def query_12_users_with_their_most_used_transportation_mode(self):
-        query = """
-            SELECT
-                user_id,
-                transportation_mode
-            FROM
-                (
-                SELECT
-                    user_id,
-                    transportation_mode,
-                    ROW_NUMBER() OVER(
-                    PARTITION BY user_id
-                ORDER BY
-                    COUNT(*)
-                DESC
-                ) AS activity_rank
-            FROM
-                Activity
-            WHERE
-                transportation_mode IS NOT NULL
-            GROUP BY
-                user_id,
-                transportation_mode) AS ranked_activities
-                WHERE
-                    activity_rank = 1
-                GROUP BY
-                    user_id,
-                    transportation_mode
-                ORDER BY
-                    user_id;
+        result = self.trackpoints_collection.aggregate(
+            [
+                {
+                    "$match": {
+                        "$expr": {
+                            "$and": [
+                                {"$gte": ["$lat", 39.916]},
+                                {"$lt": ["$lat", 39.917]},
+                                {"$gte": ["$lon", 116.397]},
+                                {"$lt": ["$lon", 116.398]},
+                            ]
+                        }
+                    }
+                },
+                {"$group": {"_id": "$user_id"}},
+            ]
+        )
+
+        result = list(result)
+
+        print(tabulate([[line["_id"]] for line in result], headers=["Users"]))
+
+    def query_eleven(self):
         """
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
-        print(
-            f"All users with registered transportation modes and their most used transportation mode: \n{tabulate(result, headers=['user_id', 'transportation_mode'])} ")
+        Find all users who have registered transportation_mode and their most used transportation_mode.
+
+        First filter out all activities where transportation_mode is None.
+        Then group by user_id and transportation_mode and count the number of activities for each user and transportation_mode.
+        Then group by user_id and find the transportation_mode with the highest count for each user.
+        """
+        result = self.activities_collection.aggregate([
+            {
+                "$match": {
+                    "transportation_mode": {
+                        "$ne": None
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "user_id": "$user_id",
+                        "transportation_mode": "$transportation_mode"
+                    },
+                    "count_activities": {
+                        "$count": {}
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id.user_id",
+                    "most_used_transportation_mode": {
+                        "$max": {
+                            "max": "$count_activities",
+                            "mode": "$_id.transportation_mode",
+                        }
+                    },
+                }
+            },
+            {
+                "$sort": {
+                    "_id": 1
+                }
+            },
+        ])
+
+        result = list(result)
+        table = [(line["_id"], line["most_used_transportation_mode"]["mode"], line["most_used_transportation_mode"]["max"]) for line in result]
+
+        print("Users who have registered transportation_mode and their most used transportation_mode")
+        print(tabulate(table, headers=["User", "Mode", "Count"]))
 
     def query_print_samples(self):
         user = self.users_collection.find_one()
@@ -305,11 +310,9 @@ def main(query):
         elif query == 9:
             program.query_nine()
         elif query == 10:
-            program.query_10_longest_distances_per_transportation_mode_per_day()
+            program.query_ten()
         elif query == 11:
-            program.query_11_users_with_invalid_activities()
-        elif query == 12:
-            program.query_12_users_with_their_most_used_transportation_mode()
+            program.query_eleven()
         elif query == 13:
             program.query_print_samples()
         else:

@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from pymongo import MongoClient
 from DbConnector import DbConnector
 from datetime import datetime
 
@@ -65,7 +64,7 @@ class DataLoader:
                 transportation_mode = labels.get((start_date_time, end_date_time), None)
 
                 filtered_track_points = track_points[track_points.iloc[:, 3] != -777]
-                altitude_diff = filtered_track_points.iloc[:, 3].diff()
+                altitude_diff = filtered_track_points.iloc[:, 3].diff().sum()
 
                 track_points_list = track_points.apply(
                     lambda row: {"user_id": user_id, "activity_id": activity, 'lat': row[0], 'lon': row[1], 'altitude': row[3], 'date_days': row[4],
