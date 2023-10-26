@@ -63,17 +63,14 @@ class Queries:
 
     def query_four(self):
         """Find all users who have taken a taxi."""
-        result = self.activities_collection.find(
+        result = self.activities_collection.distinct(
+            "user_id",
             {
                 "transportation_mode": "taxi"
-            },
-            {
-                "user_id": 1,
-                "_id": 0
             }
         )
-        print("All users who have taken a taxi:")
-        pprint(list(result))
+
+        print(tabulate([[line] for line in list(result)], headers=["All users who have taken a taxi"]))
 
     def query_five(self):
         transportation_not_null = { "$match": {"transportation_mode": {"$ne": None}}}
@@ -169,7 +166,8 @@ class Queries:
         ])
         result = list(result)
         print("Top 20 users who have gained the most altitude")
-        pprint(list(result))
+        table = [(line["_id"], round(line["max_altitude_gain"], 4)) for line in result]
+        print(tabulate(table, headers=["User", "Altitude gain"]))
 
     def query_nine(self):
         query_altitude_trackpoint = "SELECT Activity.user_id, activity_id, altitude " \
@@ -216,8 +214,8 @@ class Queries:
         )
 
         result = list(result)
-        print("Users who have tracked an activity in the Forbidden City of Beijing")
-        pprint(result)
+
+        print(tabulate([[line["_id"]] for line in result], headers=["Users"]))
 
     def query_eleven(self):
         """
@@ -280,7 +278,7 @@ def main(query):
 
         # cleanly run queries based on argument
         if query == 1:
-            pass
+            program.query_one()
         elif query == 2:
             program.query_two()
         elif query == 3:
@@ -314,6 +312,6 @@ def main(query):
 if __name__ == '__main__':
     # Use args to be able to choose which query you want to run
     parser = argparse.ArgumentParser(description="Choose query")
-    parser.add_argument("-query", type=int, help="Choose query")
+    parser.add_argument("-query", type=int, help="Choose query", default=11)
     args = parser.parse_args()
     main(args.query)
