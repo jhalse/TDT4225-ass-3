@@ -172,22 +172,18 @@ class Queries:
         print(tabulate(table, headers=["User", "Altitude gain"]))
 
     def query_nine(self):
-        query_altitude_trackpoint = "SELECT Activity.user_id, activity_id, altitude " \
-                                    "FROM TrackPoint " \
-                                    "JOIN Activity ON Activity.id = TrackPoint.activity_id "
-        df = pd.read_sql(query_altitude_trackpoint, self.db_connection)
-        # handle invalid values
-        df = df[df['altitude'] != -777]
-        # diff(): calculates the difference between current and prev row on altitude ie. altitude difference
-        df['altitude_gain'] = df.groupby(['user_id', 'activity_id'])['altitude'].diff()
-        # replace negative gains with 0
-        df['altitude_gain'] = df['altitude_gain'].apply(lambda x: x if x > 0 else 0)
-        # summing up altitude gains, now only positive values
-        total_altitude_gain = df.groupby('user_id')['altitude_gain'].sum().reset_index()
-        # sort users by gain
-        sorted_users = total_altitude_gain.sort_values(by='altitude_gain', ascending=False)
-        top_15_users = sorted_users.head(15)
-        print(top_15_users)
+        data = list(self.trackpoints_collection.find())
+        df = pd.DataFrame(data)
+
+        df["time_diff"] = df.groupby("activity_id")["date_from"].diff()
+
+        df["invalid"] = df["time_diff"] > pd.Timedelta(minutes=5)
+
+        result = df[df['invalid']].groupby('user_id')['activity_id'].nunique().reset_index()
+        result.columns = ["UserId", "InvalidActivities"]
+        pd.set_option('display.max_rows', None)
+        print(result)
+    
 
     def query_ten(self):
         """
