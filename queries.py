@@ -162,7 +162,7 @@ class Queries:
         """
 
         result = self.activities_collection.aggregate([
-            {"$group": {"_id": "$user_id", "max_altitude_gain": {"$sum": {"$multiply": ["$altitude_diff", 0.3048]}}}},
+            {"$group": {"_id": "$user_id", "max_altitude_gain": {"$sum": {"$multiply": ["$altitude_gained", 0.3048]}}}},
             {"$sort": {"max_altitude_gain": -1}},
             {"$limit": 20}
         ])
